@@ -1672,12 +1672,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 15c622099afef7d4cb36baf2722843df, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  wave1Duration: 30
+  wave1Duration: 4
   flickTarget: {fileID: 1583394542}
   wave2Targets:
   - {fileID: 800780830}
   - {fileID: 778609507}
-  wave2HitsToDestroyPerTarget: 30
+  wave2HitsToDestroyPerTarget: 3
   wave2MinSpacing: 3
   wave1AreaCenter: {x: 0, y: 1.5, z: 15}
   wave1AreaSize: {x: 8, y: 3, z: 2}
