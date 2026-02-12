@@ -27,8 +27,8 @@ public class PlayerShoot : MonoBehaviour
     [SerializeField] private float hitImpactLifetime = 4f;
 
     private int bulletsInMag;
-    private float nextFireTime = 0f;
-    private bool isReloading = false;
+    private float nextFireTime;
+    private bool isReloading;
 
     void Start()
     {
@@ -114,8 +114,8 @@ public class PlayerShoot : MonoBehaviour
         if (hitImpactPrefab != null)
         {
             Quaternion rot = Quaternion.LookRotation(hit.normal);
-            GameObject impact = Instantiate(hitImpactPrefab, hit.point, rot);
-            Destroy(impact, hitImpactLifetime);
+            GameObject impact = Object.Instantiate(hitImpactPrefab, hit.point, rot);
+            Object.Destroy(impact, hitImpactLifetime);
         }
 
         Wave2Target wave2Target = hit.collider.GetComponentInParent<Wave2Target>();
@@ -154,6 +154,9 @@ public class PlayerShoot : MonoBehaviour
         if (bulletsInMag == magazineSize)
             return;
 
+        if (sessionManager != null)
+            sessionManager.RegisterReloadStarted();
+
         StartCoroutine(ReloadRoutine());
     }
 
@@ -165,7 +168,10 @@ public class PlayerShoot : MonoBehaviour
         isReloading = false;
 
         if (sessionManager != null)
+        {
+            sessionManager.RegisterReloadFinished();
             sessionManager.UpdateAmmoDisplay(bulletsInMag, magazineSize, false);
+        }
     }
 
     private IEnumerator ShowTracer(Vector3 start, Vector3 end)

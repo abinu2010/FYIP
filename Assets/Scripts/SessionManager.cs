@@ -1,13 +1,13 @@
-using System.IO;
 using System.Globalization;
-using UnityEngine;
+using System.IO;
 using TMPro;
+using UnityEngine;
 
 public class SessionManager : MonoBehaviour
 {
     [Header("Session Settings")]
     [SerializeField] private float sessionDuration = 90f;
-    [SerializeField] private int maxRounds = 3;
+    [SerializeField] private int maxRounds = 1;
 
     [Header("HUD UI")]
     [SerializeField] private TMP_Text timerText;
@@ -62,22 +62,14 @@ public class SessionManager : MonoBehaviour
     private int recoilSamples;
     private float sumRecoilError;
 
-    private float sumAccuracyOverall;
-    private float sumAccuracyWave1;
-    private float sumAccuracyWave2;
-    private float sumAvgKillTimeWave1;
-    private float sumHitsPerMinute;
-    private float sumAvgRecoilRadius;
-    private float sumWave2Tightness;
-    private float sumFlickScore;
-    private float sumRecoilScore;
-    private float sumFinalScore;
+    private int reloadCount;
+    private float reloadStartTime;
+    private float reloadTimeSum;
+    private bool reloadActive;
 
     void Start()
     {
-        ResetAggregateStats();
         ResetToMenuState();
-        Debug.Log("CSV path: " + Application.persistentDataPath);
     }
 
     void Update()
@@ -98,13 +90,10 @@ public class SessionManager : MonoBehaviour
 
     public void StartSession()
     {
-        LockPlayerIdIfNeeded();
+        LockPlayerId();
 
         if (currentRound >= maxRounds)
-        {
-            ResetAggregateStats();
             currentRound = 0;
-        }
 
         currentRound++;
 
@@ -130,6 +119,11 @@ public class SessionManager : MonoBehaviour
 
         recoilSamples = 0;
         sumRecoilError = 0f;
+
+        reloadCount = 0;
+        reloadStartTime = 0f;
+        reloadTimeSum = 0f;
+        reloadActive = false;
 
         if (playerShoot != null)
         {
@@ -194,13 +188,14 @@ public class SessionManager : MonoBehaviour
 
         float avgTimePerTargetWave1 = wave1Hits > 1 ? sumWave1HitIntervals / (wave1Hits - 1) : 0f;
         float avgRecoilRadius = recoilSamples > 0 ? sumRecoilError / recoilSamples : 0f;
-
         float tightness = recoilSamples > 0 ? (wave2InsideHits / (float)recoilSamples) * 100f : 0f;
 
         float flickScore = ComputeFlickScore(accuracyWave1, avgTimePerTargetWave1);
         float recoilScore = ComputeRecoilScore(accuracyWave2, tightness);
         float finalScore = (flickScore + recoilScore) * 0.5f;
         string rank = GetRank(finalScore);
+
+        float avgReloadTime = reloadCount > 0 ? reloadTimeSum / reloadCount : 0f;
 
         SaveSessionResult(
             accuracyOverall,
@@ -210,70 +205,56 @@ public class SessionManager : MonoBehaviour
             hitsPerMinute,
             avgRecoilRadius,
             tightness,
+            wave2Misses,
+            wave2InsideHits,
+            wave2OutsideHits,
             flickScore,
             recoilScore,
             finalScore,
-            currentRound
+            currentRound,
+            reloadCount,
+            avgReloadTime
         );
-
-        sumAccuracyOverall += accuracyOverall;
-        sumAccuracyWave1 += accuracyWave1;
-        sumAccuracyWave2 += accuracyWave2;
-        sumAvgKillTimeWave1 += avgTimePerTargetWave1;
-        sumHitsPerMinute += hitsPerMinute;
-        sumAvgRecoilRadius += avgRecoilRadius;
-        sumWave2Tightness += tightness;
-        sumFlickScore += flickScore;
-        sumRecoilScore += recoilScore;
-        sumFinalScore += finalScore;
 
         if (summaryText != null)
         {
-            if (currentRound < maxRounds)
-            {
-                summaryText.text =
-                    "Player: " + lockedPlayerId + "\n" +
-                    "Round " + currentRound + " of " + maxRounds + "\n" +
-                    "Score: " + finalScore.ToString("F0") + " | " + rank + "\n" +
-                    "Press Start for next round";
-            }
-            else
-            {
-                float avgOverallAccuracy = sumAccuracyOverall / maxRounds;
-                float avgWave1Accuracy = sumAccuracyWave1 / maxRounds;
-                float avgWave2Accuracy = sumAccuracyWave2 / maxRounds;
-                float avgWave1Time = sumAvgKillTimeWave1 / maxRounds;
-                float avgHpm = sumHitsPerMinute / maxRounds;
-                float avgRecoil = sumAvgRecoilRadius / maxRounds;
-                float avgTight = sumWave2Tightness / maxRounds;
-                float avgFlick = sumFlickScore / maxRounds;
-                float avgRecoilScore = sumRecoilScore / maxRounds;
-                float avgFinal = sumFinalScore / maxRounds;
-                string avgRank = GetRank(avgFinal);
-
-                summaryText.text =
-                    "Player: " + lockedPlayerId + "\n" +
-                    "Rounds: " + maxRounds + "\n\n" +
-                    "Avg overall accuracy: " + avgOverallAccuracy.ToString("F1") + "%\n" +
-                    "Avg wave1 accuracy: " + avgWave1Accuracy.ToString("F1") + "%\n" +
-                    "Avg wave2 accuracy: " + avgWave2Accuracy.ToString("F1") + "%\n" +
-                    "Avg wave1 time/target: " + avgWave1Time.ToString("F2") + "s\n" +
-                    "Avg hits per minute: " + avgHpm.ToString("F1") + "\n" +
-                    "Avg recoil radius: " + avgRecoil.ToString("F2") + "\n" +
-                    "Avg recoil tightness: " + avgTight.ToString("F1") + "%\n\n" +
-                    "Avg flick score: " + avgFlick.ToString("F0") + "\n" +
-                    "Avg recoil score: " + avgRecoilScore.ToString("F0") + "\n" +
-                    "Avg drill score: " + avgFinal.ToString("F0") + "\n" +
-                    "Skill level: " + avgRank;
-
-                ResetAggregateStats();
-                currentRound = 0;
-            }
+            summaryText.text =
+                "Player: " + lockedPlayerId + "\n" +
+                "Drill score: " + finalScore.ToString("F0") + "  " + rank + "\n" +
+                "Accuracy: " + accuracyOverall.ToString("F1") + "%\n" +
+                "Reloads: " + reloadCount + "  Avg reload: " + avgReloadTime.ToString("F2") + "s\n" +
+                "Close Drill build. Open Game build.";
         }
 
         UpdateTimerUI();
         UpdateLiveStats();
         SetWave(0);
+    }
+
+    public void RegisterReloadStarted()
+    {
+        if (!sessionActive)
+            return;
+
+        if (reloadActive)
+            return;
+
+        reloadActive = true;
+        reloadStartTime = Time.time;
+        reloadCount++;
+    }
+
+    public void RegisterReloadFinished()
+    {
+        if (!sessionActive)
+            return;
+
+        if (!reloadActive)
+            return;
+
+        reloadActive = false;
+        float d = Mathf.Max(0f, Time.time - reloadStartTime);
+        reloadTimeSum += d;
     }
 
     public void RegisterShot()
@@ -329,7 +310,6 @@ public class SessionManager : MonoBehaviour
 
         UpdateLiveStats();
     }
-
     public void RegisterFlickTargetSpawn(Vector3 targetCenterWorld)
     {
         if (!sessionActive)
@@ -338,7 +318,6 @@ public class SessionManager : MonoBehaviour
         if (currentWave != 1)
             return;
     }
-
     public void RegisterRecoilSample(Vector3 hitPoint, Vector3 centerPoint)
     {
         RegisterRecoilSample(hitPoint, centerPoint, 0.15f);
@@ -430,7 +409,7 @@ public class SessionManager : MonoBehaviour
             if (wave1Hits > 1)
             {
                 float avgTime = sumWave1HitIntervals / (wave1Hits - 1);
-                flickStatsText.text = "Hits: " + wave1Hits + " | Avg time/target: " + avgTime.ToString("F2") + "s";
+                flickStatsText.text = "Hits: " + wave1Hits + "  Avg: " + avgTime.ToString("F2") + "s";
             }
             else
             {
@@ -445,29 +424,26 @@ public class SessionManager : MonoBehaviour
 
             recoilStatsText.text =
                 "Hits: " + wave2Hits +
-                " | Miss: " + wave2Misses +
-                " | In: " + wave2InsideHits +
-                " | Out: " + wave2OutsideHits +
-                " | Tight: " + tight.ToString("F1") + "% " +
-                " | AvgR: " + (recoilSamples > 0 ? avgRadius.ToString("F2") : "-");
+                "  Miss: " + wave2Misses +
+                "  In: " + wave2InsideHits +
+                "  Out: " + wave2OutsideHits +
+                "  Tight: " + tight.ToString("F1") + "%" +
+                "  AvgR: " + (recoilSamples > 0 ? avgRadius.ToString("F2") : "-");
         }
     }
 
-    private void LockPlayerIdIfNeeded()
+    private void LockPlayerId()
     {
         if (playerIdLocked)
         {
             if (playerIdInput != null)
-            {
                 playerIdInput.gameObject.SetActive(false);
-            }
             return;
         }
 
         string id = "Player";
         if (playerIdInput != null)
         {
-            playerIdInput.gameObject.SetActive(true); 
             string input = playerIdInput.text.Trim();
             if (!string.IsNullOrEmpty(input))
                 id = input;
@@ -510,20 +486,6 @@ public class SessionManager : MonoBehaviour
             summaryText.text = "Press Start to begin";
     }
 
-    private void ResetAggregateStats()
-    {
-        sumAccuracyOverall = 0f;
-        sumAccuracyWave1 = 0f;
-        sumAccuracyWave2 = 0f;
-        sumAvgKillTimeWave1 = 0f;
-        sumHitsPerMinute = 0f;
-        sumAvgRecoilRadius = 0f;
-        sumWave2Tightness = 0f;
-        sumFlickScore = 0f;
-        sumRecoilScore = 0f;
-        sumFinalScore = 0f;
-    }
-
     private float ComputeFlickScore(float accuracyWave1, float avgTimePerTarget)
     {
         float timeScore = 0f;
@@ -556,58 +518,58 @@ public class SessionManager : MonoBehaviour
         float hitsPerMinute,
         float avgRecoilRadius,
         float tightness,
+        int wave2MissValue,
+        int wave2InsideValue,
+        int wave2OutsideValue,
         float flickScore,
         float recoilScore,
         float finalScore,
-        int roundIndex
+        int roundIndex,
+        int reloads,
+        float avgReloadTime
     )
     {
         string path = Path.Combine(Application.persistentDataPath, csvFileName);
         bool fileExists = File.Exists(path);
 
-        try
+        using (StreamWriter writer = new StreamWriter(path, true))
         {
-            using (StreamWriter writer = new StreamWriter(path, true))
-            {
-                if (!fileExists)
-                    writer.WriteLine("Timestamp,PlayerId,Round,OverallAccuracy,Wave1Accuracy,Wave2Accuracy,Wave1AvgTimePerTarget,HitsPerMinute,Wave2AvgRecoilRadius,Wave2TightnessPercent,Wave2Misses,Wave2InsideHits,Wave2OutsideHits,FlickScore,RecoilScore,FinalScore,TotalShots,TotalHits,Wave1Shots,Wave1Hits,Wave2Shots,Wave2Hits");
+            if (!fileExists)
+                writer.WriteLine("TimestampUtc,PlayerId,Round,OverallAccuracy,Wave1Accuracy,Wave2Accuracy,Wave1AvgTimePerTarget,HitsPerMinute,Wave2AvgRecoilRadius,Wave2TightnessPercent,Wave2Misses,Wave2InsideHits,Wave2OutsideHits,FlickScore,RecoilScore,FinalScore,ReloadCount,AvgReloadTime,TotalShots,TotalHits,Wave1Shots,Wave1Hits,Wave2Shots,Wave2Hits");
 
-                string timestamp = System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-                string safeId = lockedPlayerId.Replace(",", "_");
+            string timestamp = System.DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+            string safeId = lockedPlayerId.Replace(",", "_");
 
-                string line = string.Format(
-                    CultureInfo.InvariantCulture,
-                    "{0},{1},{2},{3:F1},{4:F1},{5:F1},{6:F2},{7:F1},{8:F2},{9:F1},{10},{11},{12},{13:F0},{14:F0},{15:F0},{16},{17},{18},{19},{20},{21}",
-                    timestamp,
-                    safeId,
-                    roundIndex,
-                    accuracyOverall,
-                    accuracyWave1,
-                    accuracyWave2,
-                    avgTimePerTargetWave1,
-                    hitsPerMinute,
-                    avgRecoilRadius,
-                    tightness,
-                    wave2Misses,
-                    wave2InsideHits,
-                    wave2OutsideHits,
-                    flickScore,
-                    recoilScore,
-                    finalScore,
-                    totalShots,
-                    totalHits,
-                    wave1Shots,
-                    wave1Hits,
-                    wave2Shots,
-                    wave2Hits
-                );
+            string line = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0},{1},{2},{3:F1},{4:F1},{5:F1},{6:F2},{7:F1},{8:F2},{9:F1},{10},{11},{12},{13:F0},{14:F0},{15:F0},{16},{17:F4},{18},{19},{20},{21},{22},{23},{24}",
+                timestamp,
+                safeId,
+                roundIndex,
+                accuracyOverall,
+                accuracyWave1,
+                accuracyWave2,
+                avgTimePerTargetWave1,
+                hitsPerMinute,
+                avgRecoilRadius,
+                tightness,
+                wave2MissValue,
+                wave2InsideValue,
+                wave2OutsideValue,
+                flickScore,
+                recoilScore,
+                finalScore,
+                reloads,
+                avgReloadTime,
+                totalShots,
+                totalHits,
+                wave1Shots,
+                wave1Hits,
+                wave2Shots,
+                wave2Hits
+            );
 
-                writer.WriteLine(line);
-            }
-        }
-        catch (System.Exception ex)
-        {
-            Debug.LogWarning("CSV save failed: " + ex.Message);
+            writer.WriteLine(line);
         }
     }
 }
